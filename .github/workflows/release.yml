@@ -29,7 +29,7 @@ jobs:
             target: aarch64-apple-darwin
             artifact_name: grandstrat-macos-arm64
             binary_name: grandstrat
-          - os: macos-13
+          - os: macos-latest
             target: x86_64-apple-darwin
             artifact_name: grandstrat-macos-x86_64
             binary_name: grandstrat
