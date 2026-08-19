@@ -1,0 +1,18 @@
+# Build artifacts
+/target/
+provinces_cache.bin
+
+# macOS system files
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editor directories
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Exported custom configs
+mapchart-config-custom-rust.txt
+/release/
