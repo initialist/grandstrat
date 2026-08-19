@@ -70,8 +70,23 @@ jobs:
     name: Create GitHub Release
     needs: build
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve latest tag
+        id: latest_tag
+        shell: bash
+        run: |
+          latest_tag="$(git tag --sort=-version:refname | head -n 1)"
+          if [ -z "$latest_tag" ]; then
+            echo "No tags found; cannot create a release."
+            exit 1
+          fi
+          echo "value=$latest_tag" >> "$GITHUB_OUTPUT"
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -80,5 +95,7 @@ jobs:
       - name: Release to GitHub
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.latest_tag.outputs.value }}
+          name: ${{ steps.latest_tag.outputs.value }}
           files: artifacts/**/*
           generate_release_notes: true
