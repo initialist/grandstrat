@@ -1,4 +1,5 @@
 use crate::camera::Camera;
+use crate::label_layout::NationLabel;
 use crate::types::{EditorTool, MapGroup, MapMode, Province, RenderStats};
 use eframe::egui;
 use std::collections::HashSet;
@@ -31,6 +32,97 @@ impl Default for UiState {
     }
 }
 
+pub fn draw_curved_nation_labels(
+    painter: &egui::Painter,
+    labels: &[NationLabel],
+    camera: &Camera,
+    viewport_rect: egui::Rect,
+) {
+    let zoom = camera.zoom;
+
+    for label in labels {
+        // Zoom LOD Filter
+        if zoom < label.min_zoom || zoom > label.max_zoom {
+            continue;
+        }
+
+        // Quick screen-space frustum culling on center of nation
+        let center_screen = camera.world_to_screen(label.center[0], label.center[1]);
+        let center_pos = egui::pos2(center_screen[0], center_screen[1]);
+        if !viewport_rect.expand(300.0).contains(center_pos) {
+            continue;
+        }
+
+        // Compute dynamic font size based on camera zoom & base size
+        let scaled_font_size = (label.base_font_size * (zoom * 0.75).sqrt()).clamp(10.0, 36.0);
+        let font_id = egui::FontId::proportional(scaled_font_size);
+
+        // Alpha calculation for smooth LOD fade-in and fade-out
+        let alpha = if zoom < label.min_zoom * 1.35 {
+            ((zoom - label.min_zoom) / (label.min_zoom * 0.35)).clamp(0.1, 1.0)
+        } else if zoom > label.max_zoom * 0.75 {
+            ((label.max_zoom - zoom) / (label.max_zoom * 0.25)).clamp(0.1, 1.0)
+        } else {
+            1.0
+        };
+
+        let u8_alpha = (alpha * 255.0) as u8;
+        let shadow_alpha = (alpha * 190.0) as u8;
+
+        let text_color = egui::Color32::from_rgba_premultiplied(255, 252, 240, u8_alpha);
+        let shadow_color = egui::Color32::from_rgba_premultiplied(10, 10, 10, shadow_alpha);
+
+        // Draw each glyph along the curved spine with tangent rotation
+        for glyph in &label.glyphs {
+            let screen_pt = camera.world_to_screen(glyph.world_pos[0], glyph.world_pos[1]);
+            let base_pos = egui::pos2(screen_pt[0], screen_pt[1]);
+
+            if !viewport_rect.expand(50.0).contains(base_pos) {
+                continue;
+            }
+
+            let char_str = glyph.char_val.to_string();
+            let galley = painter.layout_no_wrap(char_str.clone(), font_id.clone(), text_color);
+            let shadow_galley = painter.layout_no_wrap(char_str, font_id.clone(), shadow_color);
+
+            // Centering offset based on galley size
+            let center_offset = egui::vec2(-galley.size().x * 0.5, -galley.size().y * 0.5);
+
+            // 1. Render 4-Directional Drop Shadow / Outer Glow for 100% readability
+            let shadow_offsets = [
+                egui::vec2(-1.2, 0.0),
+                egui::vec2(1.2, 0.0),
+                egui::vec2(0.0, -1.2),
+                egui::vec2(0.0, 1.2),
+                egui::vec2(1.2, 1.2),
+            ];
+
+            for off in shadow_offsets {
+                painter.add(egui::Shape::Text(egui::epaint::TextShape {
+                    pos: base_pos + center_offset + off,
+                    galley: shadow_galley.clone(),
+                    underline: egui::Stroke::NONE,
+                    fallback_color: shadow_color,
+                    override_text_color: Some(shadow_color),
+                    opacity_factor: 1.0,
+                    angle: glyph.angle,
+                }));
+            }
+
+            // 2. Render Main Cartographic Glyph with Tangent Rotation
+            painter.add(egui::Shape::Text(egui::epaint::TextShape {
+                pos: base_pos + center_offset,
+                galley,
+                underline: egui::Stroke::NONE,
+                fallback_color: text_color,
+                override_text_color: Some(text_color),
+                opacity_factor: 1.0,
+                angle: glyph.angle,
+            }));
+        }
+    }
+}
+
 pub fn draw_ui(
     ctx: &egui::Context,
     ui_state: &mut UiState,
@@ -41,6 +133,7 @@ pub fn draw_ui(
     selected_idx: &mut Option<usize>,
     map_mode: &mut MapMode,
     show_borders: &mut bool,
+    show_labels: &mut bool,
     stats: &RenderStats,
     export_requested: &mut bool,
     palette_dirty: &mut bool,
@@ -79,6 +172,7 @@ pub fn draw_ui(
             ui.separator();
 
             ui.checkbox(show_borders, "Borders");
+            ui.checkbox(show_labels, "Labels");
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let editor_btn = if ui_state.show_editor { "🎨 Editor [ON]" } else { "🎨 Scenario Editor" };

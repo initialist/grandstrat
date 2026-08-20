@@ -1,6 +1,7 @@
 mod app;
 mod camera;
 mod gpu_renderer;
+mod label_layout;
 mod parser;
 mod rasterizer;
 mod types;

@@ -1,9 +1,10 @@
 use crate::camera::Camera;
 use crate::gpu_renderer::GpuRenderer;
+use crate::label_layout::{generate_nation_labels, NationLabel};
 use crate::parser::{apply_config, build_provinces, parse_svg_paths, serialize_to_mapchart_json};
 use crate::rasterizer::{get_or_build_id_map, RasterizedMap, MAP_HEIGHT, MAP_WIDTH, WORLD_HEIGHT, WORLD_WIDTH};
 use crate::types::{EditorTool, MapConfig, MapGroup, MapMode, Province, RenderStats};
-use crate::ui::{draw_ui, UiState};
+use crate::ui::{draw_curved_nation_labels, draw_ui, UiState};
 use eframe::egui;
 use std::collections::HashMap;
 use std::fs;
@@ -15,12 +16,14 @@ pub struct GrandStratApp {
     raster_map: RasterizedMap,
     provinces: Vec<Province>,
     groups: HashMap<String, MapGroup>,
+    nation_labels: Vec<NationLabel>,
     ui_state: UiState,
 
     hovered_idx: Option<usize>,
     selected_idx: Option<usize>,
     map_mode: MapMode,
     show_borders: bool,
+    show_labels: bool,
 
     has_moved_while_down: bool,
     is_first_frame: bool,
@@ -87,6 +90,9 @@ impl GrandStratApp {
         let groups = apply_config(&config, &mut provinces, &id_to_index);
         println!("Applied {} groups across provinces", groups.len());
 
+        let nation_labels = generate_nation_labels(&groups, &provinces);
+        println!("Generated {} curved nation labels", nation_labels.len());
+
         let raster_map = get_or_build_id_map(&raw_paths);
 
         let gl = cc.gl.clone().expect("OpenGL context required");
@@ -102,11 +108,13 @@ impl GrandStratApp {
             raster_map,
             provinces,
             groups,
+            nation_labels,
             ui_state: UiState::default(),
             hovered_idx: None,
             selected_idx: None,
             map_mode: MapMode::Political,
             show_borders: true,
+            show_labels: true,
             has_moved_while_down: false,
             is_first_frame: true,
             stats: RenderStats::default(),
@@ -294,6 +302,11 @@ impl eframe::App for GrandStratApp {
                         self.show_borders,
                     );
                 }
+
+                // Render Paradox-style Curved Sprawling Nation Labels
+                if self.show_labels {
+                    draw_curved_nation_labels(&ui.painter(), &self.nation_labels, &self.camera, rect);
+                }
             });
 
         // Draw UI Windows & Overlays
@@ -308,16 +321,18 @@ impl eframe::App for GrandStratApp {
             &mut self.selected_idx,
             &mut self.map_mode,
             &mut self.show_borders,
+            &mut self.show_labels,
             &self.stats,
             &mut export_requested,
             &mut palette_dirty,
         );
 
-        // Refresh GPU palette if dirty
+        // Refresh GPU palette & nation labels if dirty
         if palette_dirty {
             if let Some(renderer) = &mut self.gpu_renderer {
                 renderer.update_palette(&self.provinces, self.map_mode, [1, 63, 63], [209, 219, 221]);
             }
+            self.nation_labels = generate_nation_labels(&self.groups, &self.provinces);
         }
 
         if export_requested {

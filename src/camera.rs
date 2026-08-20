@@ -88,6 +88,13 @@ impl Camera {
         ]
     }
 
+    pub fn world_to_screen(&self, world_x: f32, world_y: f32) -> [f32; 2] {
+        [
+            world_x * self.zoom + self.pan_x,
+            world_y * self.zoom + self.pan_y,
+        ]
+    }
+
     pub fn update(&mut self) {
         if !self.is_animating {
             return;
