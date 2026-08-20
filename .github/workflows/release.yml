@@ -64,30 +64,29 @@ jobs:
             chmod +x "$APP_DIR/Contents/MacOS/grandstrat"
             cp Blank_Map.svg "$APP_DIR/Contents/Resources/"
             cp mapchart-config-world-1450.txt "$APP_DIR/Contents/Resources/"
-            cat << 'PLIST' > "$APP_DIR/Contents/Info.plist"
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>CFBundleExecutable</key>
-    <string>grandstrat</string>
-    <key>CFBundleIdentifier</key>
-    <string>com.initialist.grandstrat</string>
-    <key>CFBundleName</key>
-    <string>GrandStrategy</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>CFBundleShortVersionString</key>
-    <string>1.0.0</string>
-    <key>CFBundleInfoDictionaryVersion</key>
-    <string>6.0</string>
-    <key>LSMinimumSystemVersion</key>
-    <string>11.0</string>
-    <key>NSHighResolutionCapable</key>
-    <true/>
-</dict>
-</plist>
-PLIST
+            printf '%s\n' \
+              '<?xml version="1.0" encoding="UTF-8"?>' \
+              '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+              '<plist version="1.0">' \
+              '<dict>' \
+              '    <key>CFBundleExecutable</key>' \
+              '    <string>grandstrat</string>' \
+              '    <key>CFBundleIdentifier</key>' \
+              '    <string>com.initialist.grandstrat</string>' \
+              '    <key>CFBundleName</key>' \
+              '    <string>GrandStrategy</string>' \
+              '    <key>CFBundlePackageType</key>' \
+              '    <string>APPL</string>' \
+              '    <key>CFBundleShortVersionString</key>' \
+              '    <string>1.0.0</string>' \
+              '    <key>CFBundleInfoDictionaryVersion</key>' \
+              '    <string>6.0</string>' \
+              '    <key>LSMinimumSystemVersion</key>' \
+              '    <string>11.0</string>' \
+              '    <key>NSHighResolutionCapable</key>' \
+              '    <true/>' \
+              '</dict>' \
+              '</plist>' > "$APP_DIR/Contents/Info.plist"
             codesign --force --deep --sign - "$APP_DIR"
             cd dist && zip -y -r "${{ matrix.artifact_name }}.zip" "GrandStrategy.app" && rm -rf "GrandStrategy.app" && cd ..
           elif [[ "${{ runner.os }}" == "Windows" ]]; then
