@@ -41,63 +41,105 @@ pub fn draw_curved_nation_labels(
     let zoom = camera.zoom;
 
     for label in labels {
-        // Zoom LOD Filter
         if zoom < label.min_zoom || zoom > label.max_zoom {
+            continue;
+        }
+
+        let num_chars = label.chars.len();
+        if num_chars == 0 {
+            continue;
+        }
+
+        // Exact uniform physical scale: screen_font_size = world_font_size * zoom
+        let screen_font_size = label.world_font_size * zoom;
+        if screen_font_size < 3.0 {
+            continue;
+        }
+
+        // Smooth fade-in if very small on screen (between 3.0px and 6.0px)
+        let size_alpha = if screen_font_size < 6.0 {
+            ((screen_font_size - 3.0) / 3.0).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+
+        // Alpha calculation for smooth zoom tier transitions
+        let zoom_alpha = if zoom < label.min_zoom * 1.20 {
+            ((zoom - label.min_zoom) / (label.min_zoom * 0.20)).clamp(0.0, 1.0)
+        } else if zoom > label.max_zoom * 0.85 {
+            ((label.max_zoom - zoom) / (label.max_zoom * 0.15)).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+
+        let final_alpha = zoom_alpha * size_alpha;
+        if final_alpha <= 0.04 {
             continue;
         }
 
         // Quick screen-space frustum culling on center of nation
         let center_screen = camera.world_to_screen(label.center[0], label.center[1]);
         let center_pos = egui::pos2(center_screen[0], center_screen[1]);
-        if !viewport_rect.expand(300.0).contains(center_pos) {
+        if !viewport_rect.expand(label.world_span * zoom * 0.75 + 100.0).contains(center_pos) {
             continue;
         }
 
-        // Compute dynamic font size based on camera zoom & base size
-        let scaled_font_size = (label.base_font_size * (zoom * 0.75).sqrt()).clamp(10.0, 36.0);
-        let font_id = egui::FontId::proportional(scaled_font_size);
+        let font_id = egui::FontId::new(screen_font_size, egui::FontFamily::Name("MapSerif".into()));
+        let u8_alpha = (final_alpha * 255.0) as u8;
+        let shadow_alpha = ((final_alpha * 1.15).clamp(0.0, 1.0) * 255.0) as u8;
+        let outer_shadow_alpha = (final_alpha * 200.0) as u8;
 
-        // Alpha calculation for smooth LOD fade-in and fade-out
-        let alpha = if zoom < label.min_zoom * 1.35 {
-            ((zoom - label.min_zoom) / (label.min_zoom * 0.35)).clamp(0.1, 1.0)
-        } else if zoom > label.max_zoom * 0.75 {
-            ((label.max_zoom - zoom) / (label.max_zoom * 0.25)).clamp(0.1, 1.0)
-        } else {
-            1.0
-        };
+        let text_color = egui::Color32::from_rgba_premultiplied(255, 253, 246, u8_alpha);
+        let shadow_color = egui::Color32::from_rgba_premultiplied(0, 0, 0, shadow_alpha);
+        let outer_shadow_color = egui::Color32::from_rgba_premultiplied(0, 0, 0, outer_shadow_alpha);
 
-        let u8_alpha = (alpha * 255.0) as u8;
-        let shadow_alpha = (alpha * 190.0) as u8;
+        let shadow_dist = (screen_font_size * 0.10).clamp(1.4, 3.5);
+        let outer_dist = shadow_dist * 1.5;
 
-        let text_color = egui::Color32::from_rgba_premultiplied(255, 252, 240, u8_alpha);
-        let shadow_color = egui::Color32::from_rgba_premultiplied(10, 10, 10, shadow_alpha);
-
-        // Draw each glyph along the curved spine with tangent rotation
-        for glyph in &label.glyphs {
-            let screen_pt = camera.world_to_screen(glyph.world_pos[0], glyph.world_pos[1]);
+        for char_elem in &label.chars {
+            let screen_pt = camera.world_to_screen(char_elem.world_pos[0], char_elem.world_pos[1]);
             let base_pos = egui::pos2(screen_pt[0], screen_pt[1]);
 
-            if !viewport_rect.expand(50.0).contains(base_pos) {
+            if !viewport_rect.expand(40.0).contains(base_pos) {
                 continue;
             }
 
-            let char_str = glyph.char_val.to_string();
+            let char_str = char_elem.ch.to_string();
             let galley = painter.layout_no_wrap(char_str.clone(), font_id.clone(), text_color);
-            let shadow_galley = painter.layout_no_wrap(char_str, font_id.clone(), shadow_color);
+            let shadow_galley = painter.layout_no_wrap(char_str.clone(), font_id.clone(), shadow_color);
+            let outer_shadow_galley = painter.layout_no_wrap(char_str, font_id.clone(), outer_shadow_color);
 
-            // Centering offset based on galley size
             let center_offset = egui::vec2(-galley.size().x * 0.5, -galley.size().y * 0.5);
 
-            // 1. Render 4-Directional Drop Shadow / Outer Glow for 100% readability
-            let shadow_offsets = [
-                egui::vec2(-1.2, 0.0),
-                egui::vec2(1.2, 0.0),
-                egui::vec2(0.0, -1.2),
-                egui::vec2(0.0, 1.2),
-                egui::vec2(1.2, 1.2),
-            ];
+            // Outer soft halo
+            for off in [
+                egui::vec2(-outer_dist, 0.0),
+                egui::vec2(outer_dist, 0.0),
+                egui::vec2(0.0, -outer_dist),
+                egui::vec2(0.0, outer_dist),
+            ] {
+                painter.add(egui::Shape::Text(egui::epaint::TextShape {
+                    pos: base_pos + center_offset + off,
+                    galley: outer_shadow_galley.clone(),
+                    underline: egui::Stroke::NONE,
+                    fallback_color: outer_shadow_color,
+                    override_text_color: Some(outer_shadow_color),
+                    opacity_factor: 1.0,
+                    angle: char_elem.angle,
+                }));
+            }
 
-            for off in shadow_offsets {
+            // Inner 8-direction high-contrast solid stroke
+            for off in [
+                egui::vec2(-shadow_dist, 0.0),
+                egui::vec2(shadow_dist, 0.0),
+                egui::vec2(0.0, -shadow_dist),
+                egui::vec2(0.0, shadow_dist),
+                egui::vec2(-shadow_dist * 0.71, -shadow_dist * 0.71),
+                egui::vec2(shadow_dist * 0.71, -shadow_dist * 0.71),
+                egui::vec2(-shadow_dist * 0.71, shadow_dist * 0.71),
+                egui::vec2(shadow_dist * 0.71, shadow_dist * 0.71),
+            ] {
                 painter.add(egui::Shape::Text(egui::epaint::TextShape {
                     pos: base_pos + center_offset + off,
                     galley: shadow_galley.clone(),
@@ -105,11 +147,11 @@ pub fn draw_curved_nation_labels(
                     fallback_color: shadow_color,
                     override_text_color: Some(shadow_color),
                     opacity_factor: 1.0,
-                    angle: glyph.angle,
+                    angle: char_elem.angle,
                 }));
             }
 
-            // 2. Render Main Cartographic Glyph with Tangent Rotation
+            // Crisp luminous foreground text
             painter.add(egui::Shape::Text(egui::epaint::TextShape {
                 pos: base_pos + center_offset,
                 galley,
@@ -117,7 +159,7 @@ pub fn draw_curved_nation_labels(
                 fallback_color: text_color,
                 override_text_color: Some(text_color),
                 opacity_factor: 1.0,
-                angle: glyph.angle,
+                angle: char_elem.angle,
             }));
         }
     }

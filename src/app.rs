@@ -31,6 +31,8 @@ pub struct GrandStratApp {
     stats: RenderStats,
     frame_count: u32,
     fps_timer: Instant,
+    screenshot_stage: Option<usize>,
+    screenshot_wait: u32,
 }
 
 impl GrandStratApp {
@@ -99,6 +101,19 @@ impl GrandStratApp {
         let mut gpu_renderer = GpuRenderer::new(gl, &raster_map);
         gpu_renderer.update_palette(&provinces, MapMode::Political, [1, 63, 63], [209, 219, 221]);
 
+        // Register custom historical Renaissance serif font (Cinzel)
+        let mut fonts = egui::FontDefinitions::default();
+        fonts.font_data.insert(
+            "Cinzel".to_owned(),
+            egui::FontData::from_static(include_bytes!("../assets/fonts/Cinzel.ttf")).into(),
+        );
+        fonts
+            .families
+            .entry(egui::FontFamily::Name("MapSerif".into()))
+            .or_default()
+            .insert(0, "Cinzel".to_owned());
+        cc.egui_ctx.set_fonts(fonts);
+
         let mut camera = Camera::default();
         camera.fit_to_screen(1280.0, 720.0);
 
@@ -120,6 +135,8 @@ impl GrandStratApp {
             stats: RenderStats::default(),
             frame_count: 0,
             fps_timer: Instant::now(),
+            screenshot_stage: if std::env::args().any(|a| a == "--screenshots") { Some(0) } else { None },
+            screenshot_wait: 0,
         }
     }
 
@@ -339,6 +356,106 @@ impl eframe::App for GrandStratApp {
             let json = serialize_to_mapchart_json(&self.provinces, &self.groups);
             let _ = fs::write("mapchart-config-custom-rust.txt", json);
             println!("Exported mapchart-config-custom-rust.txt");
+        }
+
+        // Handle Screenshot Event
+        ctx.input(|i| {
+            for event in &i.raw.events {
+                if let egui::Event::Screenshot { image, .. } = event {
+                    let stage_idx = self.screenshot_stage.unwrap_or(0);
+                    let filename = match stage_idx {
+                        1 => "screenshot_1_world.png",
+                        2 => "screenshot_2_europe.png",
+                        3 => "screenshot_3_france_uk.png",
+                        4 => "screenshot_4_east_asia.png",
+                        5 => "screenshot_5_japan.png",
+                        6 => "screenshot_6_inca.png",
+                        _ => "screenshot.png",
+                    };
+                    let target_path = format!("/Users/avi/.gemini/antigravity/brain/2f27e2e3-56cb-4888-8925-3df007dcec67/{}", filename);
+                    let _ = image::save_buffer(
+                        &target_path,
+                        image.as_raw(),
+                        image.width() as u32,
+                        image.height() as u32,
+                        image::ColorType::Rgba8,
+                    );
+                    println!("📸 Saved tour screenshot: {}", target_path);
+                }
+            }
+        });
+
+        // Automated Screenshot Tour Runner
+        if let Some(stage) = self.screenshot_stage {
+            self.screenshot_wait += 1;
+            if self.screenshot_wait == 6 {
+                // Settle and capture
+                ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
+            } else if self.screenshot_wait >= 10 {
+                self.screenshot_wait = 0;
+                let next_stage = stage + 1;
+                self.screenshot_stage = Some(next_stage);
+
+                let sw = ctx.screen_rect().width();
+                let sh = ctx.screen_rect().height();
+
+                match next_stage {
+                    1 => {
+                        // Stage 1: Europe Overview (France, HRE, Poland, Castile, England, Italy)
+                        self.camera.screen_width = sw;
+                        self.camera.screen_height = sh;
+                        self.camera.jump_to(600.0, 150.0, 3.8);
+                        self.camera.zoom = 3.8;
+                        self.camera.pan_x = self.camera.target_pan_x;
+                        self.camera.pan_y = self.camera.target_pan_y;
+                        self.camera.is_animating = false;
+                    }
+                    2 => {
+                        // Stage 2: France & England Close-up
+                        self.camera.screen_width = sw;
+                        self.camera.screen_height = sh;
+                        self.camera.jump_to(570.0, 145.0, 7.0);
+                        self.camera.zoom = 7.0;
+                        self.camera.pan_x = self.camera.target_pan_x;
+                        self.camera.pan_y = self.camera.target_pan_y;
+                        self.camera.is_animating = false;
+                    }
+                    3 => {
+                        // Stage 3: East Asia & Ming Overview
+                        self.camera.screen_width = sw;
+                        self.camera.screen_height = sh;
+                        self.camera.jump_to(950.0, 220.0, 3.2);
+                        self.camera.zoom = 3.2;
+                        self.camera.pan_x = self.camera.target_pan_x;
+                        self.camera.pan_y = self.camera.target_pan_y;
+                        self.camera.is_animating = false;
+                    }
+                    4 => {
+                        // Stage 4: Japan Curved Spine Close-up
+                        self.camera.screen_width = sw;
+                        self.camera.screen_height = sh;
+                        self.camera.jump_to(1015.0, 208.0, 6.8);
+                        self.camera.zoom = 6.8;
+                        self.camera.pan_x = self.camera.target_pan_x;
+                        self.camera.pan_y = self.camera.target_pan_y;
+                        self.camera.is_animating = false;
+                    }
+                    5 => {
+                        // Stage 5: Inca Andes Spine
+                        self.camera.screen_width = sw;
+                        self.camera.screen_height = sh;
+                        self.camera.jump_to(320.0, 400.0, 3.5);
+                        self.camera.zoom = 3.5;
+                        self.camera.pan_x = self.camera.target_pan_x;
+                        self.camera.pan_y = self.camera.target_pan_y;
+                        self.camera.is_animating = false;
+                    }
+                    _ => {
+                        println!("📸 Screenshot tour complete!");
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                }
+            }
         }
 
         // Calculate Frame Stats

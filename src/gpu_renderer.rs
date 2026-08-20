@@ -81,7 +81,7 @@ impl GpuRenderer {
                     // Dynamic Multi-Tier Border Detection
                     if (u_show_borders == 1) {
                         vec2 step_offset = 1.0 / (u_world_size * u_zoom);
-                        vec2 offset = clamp(step_offset, 0.4 / u_id_tex_size, 2.0 / u_id_tex_size);
+                        vec2 offset = clamp(step_offset, 0.5 / u_id_tex_size, 3.0 / u_id_tex_size);
 
                         int id_l = decodeId(texture(u_id_texture, tex_uv + vec2(-offset.x, 0.0)));
                         int id_r = decodeId(texture(u_id_texture, tex_uv + vec2( offset.x, 0.0)));

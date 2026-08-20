@@ -4,8 +4,8 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::path::Path;
 
-pub const MAP_WIDTH: usize = 4800;
-pub const MAP_HEIGHT: usize = 2720;
+pub const MAP_WIDTH: usize = 9600;
+pub const MAP_HEIGHT: usize = 5440;
 pub const WORLD_WIDTH: f32 = 1200.0;
 pub const WORLD_HEIGHT: f32 = 680.0;
 
@@ -44,8 +44,8 @@ pub fn get_or_build_id_map(raw_paths: &[RawPath]) -> RasterizedMap {
                     }
                 }
 
-                if non_zero_count > 500_000 {
-                    println!("Loaded lossless province ID map from cache (4800x2720, {} land pixels)", non_zero_count);
+                if non_zero_count > 1_000_000 {
+                    println!("Loaded lossless province ID map from cache (9600x5440, {} land pixels)", non_zero_count);
                     let mut rgba_texture_data = vec![0u8; MAP_WIDTH * MAP_HEIGHT * 4];
                     for i in 0..id_buffer.len() {
                         let id = id_buffer[i];
@@ -70,7 +70,7 @@ pub fn get_or_build_id_map(raw_paths: &[RawPath]) -> RasterizedMap {
         }
     }
 
-    println!("Rasterizing 22,711 provinces at 4800x2720 (4x lossless density) in parallel using Rayon...");
+    println!("Rasterizing 22,711 provinces at 9600x5440 (8x lossless density) in parallel using Rayon...");
     let scale_x = MAP_WIDTH as f32 / WORLD_WIDTH;
     let scale_y = MAP_HEIGHT as f32 / WORLD_HEIGHT;
 
@@ -111,7 +111,7 @@ pub fn get_or_build_id_map(raw_paths: &[RawPath]) -> RasterizedMap {
         }
     }
 
-    println!("4800x2720 Rasterization complete: filled {} land pixels", total_filled);
+    println!("9600x5440 Rasterization complete: filled {} land pixels", total_filled);
 
     // Save to disk cache
     if let Ok(mut file) = File::create(cache_path) {
@@ -120,7 +120,7 @@ pub fn get_or_build_id_map(raw_paths: &[RawPath]) -> RasterizedMap {
             byte_buffer.extend_from_slice(&id.to_le_bytes());
         }
         let _ = file.write_all(&byte_buffer);
-        println!("Saved 4800x2720 province ID map cache (provinces_cache.bin)");
+        println!("Saved 9600x5440 province ID map cache (provinces_cache.bin)");
     }
 
     RasterizedMap {

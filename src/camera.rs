@@ -45,7 +45,7 @@ impl Camera {
         let fit_pan_x = (width - WORLD_WIDTH * fit_zoom) * 0.5;
         let fit_pan_y = (height - WORLD_HEIGHT * fit_zoom) * 0.5;
 
-        self.min_zoom = fit_zoom;
+        self.min_zoom = (fit_zoom * 0.75).max(0.4);
         self.zoom = fit_zoom;
         self.target_zoom = fit_zoom;
         self.pan_x = fit_pan_x;
@@ -56,7 +56,7 @@ impl Camera {
     }
 
     pub fn zoom_at(&mut self, screen_x: f32, screen_y: f32, factor: f32) {
-        let new_zoom = (self.target_zoom * factor).clamp(self.min_zoom, 120.0);
+        let new_zoom = (self.target_zoom * factor).clamp(self.min_zoom, 180.0);
         let world_pt = self.screen_to_world(screen_x, screen_y);
 
         self.target_zoom = new_zoom;

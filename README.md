@@ -14,10 +14,10 @@ Includes the complete **World (1450 CE)** historical scenario featuring **280 di
 * **🎯 100.00% Pixel-Perfect O(1) Hit Detection**:
   * Uses discrete integer province ID texture mapping with `GL_NEAREST` filtering (0 edge-color blending).
   * Direct CPU array lookup `id_buffer[py * width + px]` executes in `< 0.0001 ms` with zero geometric error.
-* **🔍 4800×2720 Lossless 4x Vector Density & 120x Zoom**:
-  * Sub-pixel sharpness for every curve, coastline, and border.
-  * Zoom in up to **120.0x** to view and click micro-provinces and city-states (e.g. San Marino, Venice, Ragusa, Frankfurt).
-  * Maximum zoom-out is mathematically bounded to the full-screen fit with centered vertical/horizontal alignment.
+* **🔍 9600×5440 Lossless 8x Vector Density & 180x Zoom**:
+  * Sub-pixel sharpness for every curve, coastline, and border across 52.2 million texels and 15+ million land pixels.
+  * Zoom in up to **180.0x** to view and click micro-provinces and city-states (e.g. San Marino, Venice, Ragusa, Frankfurt).
+  * Maximum zoom-out is smoothly bounded with responsive minimum zoom limits.
 * **🗺 Dynamic Multi-Tier Border System (LOD)**:
   * **Zoomed Out (`< 2.0x`)**: Displays crisp international borders between different nations/colors and coastlines. Internal province borders are hidden so nations appear as solid, unified territories.
   * **Zoomed In (`>= 2.0x`)**: Internal province borders smoothly fade in for precision province interaction.
