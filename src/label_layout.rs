@@ -160,23 +160,8 @@ fn build_curved_label(
     let box_w = (max_x - min_x).max(4.0);
     let box_h = (max_y - min_y).max(4.0);
 
-    // 2. Base Zoom Tier based on Province Count
-    let (min_zoom, max_zoom) = if total_province_count >= 200 {
-        // Massive Continental Empire (e.g. Ming, France, Inca, Japan, Ottomans, HRE)
-        (0.4, 50.0)
-    } else if total_province_count >= 80 {
-        // Large Kingdom (e.g. Poland, Castile, England, Hungary, Byzantium)
-        (0.7, 70.0)
-    } else if total_province_count >= 20 {
-        // Regional Kingdoms & Duchies (e.g. Portugal, Scotland, Bohemia, Bavaria, Milan, Venice)
-        (1.2, 90.0)
-    } else if total_province_count >= 6 {
-        // Minor Duchies / Counties
-        (2.0, 120.0)
-    } else {
-        // Minor County / Island / Micro-State
-        (3.5, 150.0)
-    };
+    // 2. Base Zoom Tier: All labels eligible for global visibility
+    let (min_zoom, max_zoom) = (0.2, 180.0);
 
     if chars.len() == 1 {
         let label_chars = vec![NationLabelChar {
@@ -222,16 +207,22 @@ fn build_curved_label(
 
     let aspect_ratio = (lambda1 / lambda2).sqrt();
 
+    let num_chars = chars.len();
+    let thickness = box_w.min(box_h);
+    let geo_mean = (box_w * box_h).sqrt();
+
     // If the country is compact/squarish (aspect ratio < 1.7, like France, China, Byzantium, HRE)
     // or has very few provinces: standard horizontal placement centered at center-of-mass!
     if aspect_ratio < 1.7 || n <= 3 {
         let world_span = box_w.max(box_h * 0.85);
-        let num_chars = chars.len();
+        let target_span = world_span * 0.62;
 
-        let usable_span = world_span * 0.65;
-        let world_step = usable_span / (num_chars - 1).max(1) as f32;
-        let world_font_size = (world_step * 0.70).min(world_span * 0.18 + 0.3).clamp(0.1, 10.0);
-        let clamped_step = world_step.min(world_font_size * 1.50);
+        let natural_font = (thickness * 0.16 + geo_mean * 0.05 + 0.35).clamp(0.4, 6.5);
+        let max_font_for_span = (target_span * 1.15) / (0.80 * (num_chars - 1).max(1) as f32 + 0.70);
+        let world_font_size = natural_font.min(max_font_for_span).clamp(0.25, 6.0);
+
+        let ideal_step = (target_span - world_font_size * 0.70) / (num_chars - 1).max(1) as f32;
+        let clamped_step = ideal_step.clamp(world_font_size * 0.85, world_font_size * 2.20);
         let total_world_w = (num_chars - 1) as f32 * clamped_step;
         let start_x = cx - total_world_w * 0.5;
 
@@ -402,17 +393,20 @@ fn build_curved_label(
     let num_chars = chars.len();
 
     let world_span = (max_u - min_u).max(box_w.max(box_h) * 0.75);
+    let target_arc = total_arc_len * 0.65;
 
-    let usable_arc = total_arc_len * 0.65;
-    let s_step = usable_arc / (num_chars - 1).max(1) as f32;
-    let world_font_size = (s_step * 0.70).min(world_span * 0.18 + 0.3).clamp(0.1, 10.0);
-    let s_step_clamped = s_step.min(world_font_size * 1.50);
-    let total_world_arc = (num_chars - 1) as f32 * s_step_clamped;
-    let s_start = (total_arc_len - total_world_arc) * 0.5;
+    let natural_font = (thickness * 0.16 + geo_mean * 0.05 + 0.35).clamp(0.4, 6.5);
+    let max_font_for_span = (target_arc * 1.15) / (0.80 * (num_chars - 1).max(1) as f32 + 0.70);
+    let world_font_size = natural_font.min(max_font_for_span).clamp(0.25, 6.0);
+
+    let ideal_step = (target_arc - world_font_size * 0.70) / (num_chars - 1).max(1) as f32;
+    let s_step = ideal_step.clamp(world_font_size * 0.85, world_font_size * 2.20);
+    let total_world_arc = (num_chars - 1) as f32 * s_step;
+    let s_start = ((total_arc_len - total_world_arc) * 0.5).max(0.0);
 
     let mut label_chars = Vec::with_capacity(num_chars);
     for (i, &ch) in chars.iter().enumerate() {
-        let s = s_start + i as f32 * s_step_clamped;
+        let s = s_start + i as f32 * s_step;
         let t = s_to_t(s);
         let (pt, tangent) = eval_bezier(t);
 
@@ -493,13 +487,23 @@ mod tests {
         }
 
         let labels = generate_nation_labels(&groups, &provinces);
-        for l in &labels {
-            let u_name = l.name.to_uppercase();
-            if u_name == "FRANCE" || u_name == "GASCONY" || u_name == "NORMANDY" || u_name == "BRITTANY" || u_name == "PIEDMONT" {
-                println!("=== Nation: {} (chars: {}, span: {:.1}, world_font: {:.1}) ===", l.name, l.chars.len(), l.world_span, l.world_font_size);
-                for c in &l.chars {
-                    println!("    Char '{}' @ pos ({:.1}, {:.1}) | angle: {:5.1}°", c.ch, c.world_pos[0], c.world_pos[1], c.angle.to_degrees());
-                }
+        let mut sorted = labels.clone();
+        sorted.sort_by(|a, b| b.world_font_size.partial_cmp(&a.world_font_size).unwrap());
+
+        println!("\n--- TOP 15 LARGEST FONT LABELS ---");
+        for l in sorted.iter().take(15) {
+            println!("{:<22} | Provs: {:4} | Chars: {:2} | Span: {:5.1} | Font: {:4.2}", l.name, l.province_count, l.chars.len(), l.world_span, l.world_font_size);
+        }
+
+        println!("\n--- BOTTOM 15 SMALLEST FONT LABELS ---");
+        for l in sorted.iter().rev().take(15) {
+            println!("{:<22} | Provs: {:4} | Chars: {:2} | Span: {:5.1} | Font: {:4.2}", l.name, l.province_count, l.chars.len(), l.world_span, l.world_font_size);
+        }
+
+        println!("\n--- SPECIFIC INTEREST LABELS ---");
+        for target in &["Tula", "Belgium", "France", "Holy Roman Empire", "England", "Poland", "Japan", "Inca Empire", "Chinese Empire", "Portugal", "Brittany", "Venice", "Navarre", "Scotland", "Ireland", "Kazan", "Lithuania", "Netherlands", "Norway", "Sweden", "Egypt"] {
+            if let Some(l) = labels.iter().find(|x| x.name.eq_ignore_ascii_case(target)) {
+                println!("{:<22} | Provs: {:4} | Chars: {:2} | Span: {:5.1} | Font: {:4.2}", l.name, l.province_count, l.chars.len(), l.world_span, l.world_font_size);
             }
         }
     }

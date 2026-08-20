@@ -32,6 +32,13 @@ impl Default for UiState {
     }
 }
 
+const OUTLINE_OFFSETS_16: [(f32, f32); 16] = [
+    (1.0000, 0.0000), (0.9239, 0.3827), (0.7071, 0.7071), (0.3827, 0.9239),
+    (0.0000, 1.0000), (-0.3827, 0.9239), (-0.7071, 0.7071), (-0.9239, 0.3827),
+    (-1.0000, 0.0000), (-0.9239, -0.3827), (-0.7071, -0.7071), (-0.3827, -0.9239),
+    (-0.0000, -1.0000), (0.3827, -0.9239), (0.7071, -0.7071), (0.9239, -0.3827),
+];
+
 pub fn draw_curved_nation_labels(
     painter: &egui::Painter,
     labels: &[NationLabel],
@@ -52,13 +59,13 @@ pub fn draw_curved_nation_labels(
 
         // Exact uniform physical scale: screen_font_size = world_font_size * zoom
         let screen_font_size = label.world_font_size * zoom;
-        if screen_font_size < 3.0 {
+        if screen_font_size < 2.0 {
             continue;
         }
 
-        // Smooth fade-in if very small on screen (between 3.0px and 6.0px)
-        let size_alpha = if screen_font_size < 6.0 {
-            ((screen_font_size - 3.0) / 3.0).clamp(0.0, 1.0)
+        // Smooth fade-in if tiny on screen (between 2.0px and 4.5px)
+        let size_alpha = if screen_font_size < 4.5 {
+            ((screen_font_size - 2.0) / 2.5).clamp(0.0, 1.0)
         } else {
             1.0
         };
@@ -86,15 +93,12 @@ pub fn draw_curved_nation_labels(
 
         let font_id = egui::FontId::new(screen_font_size, egui::FontFamily::Name("MapSerif".into()));
         let u8_alpha = (final_alpha * 255.0) as u8;
-        let shadow_alpha = ((final_alpha * 1.15).clamp(0.0, 1.0) * 255.0) as u8;
-        let outer_shadow_alpha = (final_alpha * 200.0) as u8;
+        let shadow_alpha = ((final_alpha * 1.15).clamp(0.0, 1.0) * 240.0) as u8;
 
         let text_color = egui::Color32::from_rgba_premultiplied(255, 253, 246, u8_alpha);
         let shadow_color = egui::Color32::from_rgba_premultiplied(0, 0, 0, shadow_alpha);
-        let outer_shadow_color = egui::Color32::from_rgba_premultiplied(0, 0, 0, outer_shadow_alpha);
 
-        let shadow_dist = (screen_font_size * 0.10).clamp(1.4, 3.5);
-        let outer_dist = shadow_dist * 1.5;
+        let outline_radius = (screen_font_size * 0.065).clamp(1.0, 1.8);
 
         for char_elem in &label.chars {
             let screen_pt = camera.world_to_screen(char_elem.world_pos[0], char_elem.world_pos[1]);
@@ -106,40 +110,13 @@ pub fn draw_curved_nation_labels(
 
             let char_str = char_elem.ch.to_string();
             let galley = painter.layout_no_wrap(char_str.clone(), font_id.clone(), text_color);
-            let shadow_galley = painter.layout_no_wrap(char_str.clone(), font_id.clone(), shadow_color);
-            let outer_shadow_galley = painter.layout_no_wrap(char_str, font_id.clone(), outer_shadow_color);
+            let shadow_galley = painter.layout_no_wrap(char_str, font_id.clone(), shadow_color);
 
             let center_offset = egui::vec2(-galley.size().x * 0.5, -galley.size().y * 0.5);
 
-            // Outer soft halo
-            for off in [
-                egui::vec2(-outer_dist, 0.0),
-                egui::vec2(outer_dist, 0.0),
-                egui::vec2(0.0, -outer_dist),
-                egui::vec2(0.0, outer_dist),
-            ] {
-                painter.add(egui::Shape::Text(egui::epaint::TextShape {
-                    pos: base_pos + center_offset + off,
-                    galley: outer_shadow_galley.clone(),
-                    underline: egui::Stroke::NONE,
-                    fallback_color: outer_shadow_color,
-                    override_text_color: Some(outer_shadow_color),
-                    opacity_factor: 1.0,
-                    angle: char_elem.angle,
-                }));
-            }
-
-            // Inner 8-direction high-contrast solid stroke
-            for off in [
-                egui::vec2(-shadow_dist, 0.0),
-                egui::vec2(shadow_dist, 0.0),
-                egui::vec2(0.0, -shadow_dist),
-                egui::vec2(0.0, shadow_dist),
-                egui::vec2(-shadow_dist * 0.71, -shadow_dist * 0.71),
-                egui::vec2(shadow_dist * 0.71, -shadow_dist * 0.71),
-                egui::vec2(-shadow_dist * 0.71, shadow_dist * 0.71),
-                egui::vec2(shadow_dist * 0.71, shadow_dist * 0.71),
-            ] {
+            // 16-point circular kernel for a smooth, continuous vector-like stroke outline
+            for (dx, dy) in OUTLINE_OFFSETS_16 {
+                let off = egui::vec2(dx * outline_radius, dy * outline_radius);
                 painter.add(egui::Shape::Text(egui::epaint::TextShape {
                     pos: base_pos + center_offset + off,
                     galley: shadow_galley.clone(),
