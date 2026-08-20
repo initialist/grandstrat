@@ -33,14 +33,48 @@ pub struct GrandStratApp {
 impl GrandStratApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         println!("Reading Blank_Map.svg...");
-        let svg_content = fs::read_to_string("Blank_Map.svg").expect("Failed to read Blank_Map.svg");
+        let svg_content = fs::read_to_string("Blank_Map.svg")
+            .or_else(|_| {
+                if let Ok(exe_path) = std::env::current_exe() {
+                    if let Some(parent) = exe_path.parent() {
+                        let p1 = parent.join("Blank_Map.svg");
+                        if p1.exists() {
+                            return fs::read_to_string(p1);
+                        }
+                        let p2 = parent.join("../Resources/Blank_Map.svg");
+                        if p2.exists() {
+                            return fs::read_to_string(p2);
+                        }
+                    }
+                }
+                Ok(include_str!("../Blank_Map.svg").to_string())
+            })
+            .expect("Failed to read Blank_Map.svg");
+
         let raw_paths = parse_svg_paths(&svg_content);
         println!("Parsed {} SVG paths", raw_paths.len());
 
         let (mut provinces, id_to_index) = build_provinces(&raw_paths);
 
         println!("Reading mapchart-config-world-1450.txt...");
-        let config_str = fs::read_to_string("mapchart-config-world-1450.txt").unwrap_or_default();
+        let config_str = fs::read_to_string("mapchart-config-world-1450.txt")
+            .or_else(|_| {
+                if let Ok(exe_path) = std::env::current_exe() {
+                    if let Some(parent) = exe_path.parent() {
+                        let p1 = parent.join("mapchart-config-world-1450.txt");
+                        if p1.exists() {
+                            return fs::read_to_string(p1);
+                        }
+                        let p2 = parent.join("../Resources/mapchart-config-world-1450.txt");
+                        if p2.exists() {
+                            return fs::read_to_string(p2);
+                        }
+                    }
+                }
+                Ok(include_str!("../mapchart-config-world-1450.txt").to_string())
+            })
+            .unwrap_or_default();
+
         let config: MapConfig = serde_json::from_str(&config_str).unwrap_or(MapConfig {
             groups: HashMap::new(),
             title: None,

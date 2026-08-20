@@ -55,16 +55,57 @@ jobs:
       - name: Package artifacts
         shell: bash
         run: |
-          mkdir dist
-          cp target/${{ matrix.target }}/release/${{ matrix.binary_name }} dist/${{ matrix.artifact_name }}
-          cp Blank_Map.svg dist/
-          cp mapchart-config-world-1450.txt dist/
+          mkdir -p dist
+          if [[ "${{ runner.os }}" == "macOS" ]]; then
+            APP_DIR="dist/GrandStrategy.app"
+            mkdir -p "$APP_DIR/Contents/MacOS"
+            mkdir -p "$APP_DIR/Contents/Resources"
+            cp target/${{ matrix.target }}/release/${{ matrix.binary_name }} "$APP_DIR/Contents/MacOS/grandstrat"
+            chmod +x "$APP_DIR/Contents/MacOS/grandstrat"
+            cp Blank_Map.svg "$APP_DIR/Contents/Resources/"
+            cp mapchart-config-world-1450.txt "$APP_DIR/Contents/Resources/"
+            cat << 'PLIST' > "$APP_DIR/Contents/Info.plist"
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleExecutable</key>
+              <string>grandstrat</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.initialist.grandstrat</string>
+              <key>CFBundleName</key>
+              <string>Grand Strategy</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>CFBundleShortVersionString</key>
+              <string>1.0.0</string>
+              <key>LSMinimumSystemVersion</key>
+              <string>11.0</string>
+              <key>NSHighResolutionCapable</key>
+              <true/>
+          </dict>
+          </plist>
+          PLIST
+            cd dist && zip -r "${{ matrix.artifact_name }}.zip" "GrandStrategy.app" && rm -rf "GrandStrategy.app" && cd ..
+          elif [[ "${{ runner.os }}" == "Windows" ]]; then
+            mkdir -p dist/grandstrat-windows-x86_64
+            cp target/${{ matrix.target }}/release/${{ matrix.binary_name }} dist/grandstrat-windows-x86_64/
+            cp Blank_Map.svg dist/grandstrat-windows-x86_64/
+            cp mapchart-config-world-1450.txt dist/grandstrat-windows-x86_64/
+            cd dist && 7z a "${{ matrix.artifact_name }}.zip" "grandstrat-windows-x86_64" && rm -rf "grandstrat-windows-x86_64" && cd ..
+          else
+            mkdir -p dist/grandstrat-linux-x86_64
+            cp target/${{ matrix.target }}/release/${{ matrix.binary_name }} dist/grandstrat-linux-x86_64/
+            cp Blank_Map.svg dist/grandstrat-linux-x86_64/
+            cp mapchart-config-world-1450.txt dist/grandstrat-linux-x86_64/
+            cd dist && tar -czvf "${{ matrix.artifact_name }}.tar.gz" "grandstrat-linux-x86_64" && rm -rf "grandstrat-linux-x86_64" && cd ..
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
-          path: dist/
+          path: dist/*
 
   release:
     name: Create GitHub Release
