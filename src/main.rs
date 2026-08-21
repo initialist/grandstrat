@@ -4,6 +4,7 @@ mod gpu_renderer;
 mod label_layout;
 mod parser;
 mod rasterizer;
+mod settlement;
 mod types;
 mod ui;
 

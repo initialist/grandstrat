@@ -15,6 +15,15 @@ pub struct UiState {
     // New Custom Faction State
     pub new_faction_label: String,
     pub new_faction_color: [u8; 3],
+
+    // Topography Relief Strength
+    pub relief_strength: f32,
+
+    // Label Layout Algorithm (Curved vs Standard)
+    pub label_algorithm: crate::types::LabelAlgorithm,
+
+    // Cities & Settlements Overlay Toggle
+    pub show_cities: bool,
 }
 
 impl Default for UiState {
@@ -28,6 +37,9 @@ impl Default for UiState {
             active_group_key: "#810f7c".to_string(), // Ottoman default
             new_faction_label: "New Faction".to_string(),
             new_faction_color: [180, 50, 80],
+            relief_strength: 0.70,
+            label_algorithm: crate::types::LabelAlgorithm::Curved,
+            show_cities: true,
         }
     }
 }
@@ -142,6 +154,77 @@ pub fn draw_curved_nation_labels(
     }
 }
 
+pub fn draw_settlements(
+    painter: &egui::Painter,
+    settlements: &[&crate::types::Settlement],
+    camera: &Camera,
+    viewport_rect: egui::Rect,
+) {
+    let zoom = camera.zoom;
+    for s in settlements {
+        let screen_pt = camera.world_to_screen(s.world_pos[0], s.world_pos[1]);
+        let pos = egui::pos2(screen_pt[0], screen_pt[1]);
+
+        if !viewport_rect.expand(50.0).contains(pos) {
+            continue;
+        }
+
+        match s.tier {
+            crate::types::SettlementTier::Capital => {
+                // Tier 1 Imperial Star / Gold Capital Badge
+                let radius = (zoom * 0.35).clamp(3.0, 5.5);
+                painter.circle_filled(pos, radius + 1.2, egui::Color32::from_black_alpha(220));
+                painter.circle_filled(pos, radius, egui::Color32::from_rgb(255, 215, 0));
+                painter.circle_filled(pos, radius * 0.45, egui::Color32::from_rgb(180, 20, 20));
+
+                // Natural mixed-case capital city label (e.g. Paris, London, Kyoto)
+                let font_size = (zoom * 0.70 + 7.5).clamp(8.5, 13.0);
+                let font_id = egui::FontId::new(font_size, egui::FontFamily::Proportional);
+                let text_pos = pos + egui::vec2(0.0, radius + 2.0);
+
+                let text_col = egui::Color32::from_rgb(255, 253, 242);
+                let shadow_col = egui::Color32::BLACK;
+
+                let galley = painter.layout_no_wrap(s.name.clone(), font_id.clone(), text_col);
+                let shadow_galley = painter.layout_no_wrap(s.name.clone(), font_id, shadow_col);
+                let offset = egui::vec2(-galley.size().x * 0.5, 0.0);
+
+                for (dx, dy) in [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0), (1.0, 1.0), (-1.0, -1.0)] {
+                    painter.galley(text_pos + offset + egui::vec2(dx, dy), shadow_galley.clone(), shadow_col);
+                }
+                painter.galley(text_pos + offset, galley, text_col);
+            }
+            crate::types::SettlementTier::City => {
+                // Tier 2 Regional City Circle Marker
+                let radius = (zoom * 0.28).clamp(2.2, 4.0);
+                painter.circle_filled(pos, radius + 1.0, egui::Color32::from_black_alpha(200));
+                painter.circle_filled(pos, radius, egui::Color32::from_rgb(235, 235, 240));
+                painter.circle_filled(pos, radius * 0.45, egui::Color32::from_rgb(40, 40, 45));
+
+                if zoom >= 2.8 {
+                    // Natural mixed-case city label (e.g. Lyon, Bordeaux, Milan)
+                    let font_size = (zoom * 0.55 + 6.5).clamp(7.5, 11.5);
+                    let font_id = egui::FontId::new(font_size, egui::FontFamily::Proportional);
+                    let text_pos = pos + egui::vec2(0.0, radius + 2.0);
+
+                    let text_col = egui::Color32::from_rgb(240, 240, 240);
+                    let shadow_col = egui::Color32::BLACK;
+
+                    let galley = painter.layout_no_wrap(s.name.clone(), font_id.clone(), text_col);
+                    let shadow_galley = painter.layout_no_wrap(s.name.clone(), font_id, shadow_col);
+                    let offset = egui::vec2(-galley.size().x * 0.5, 0.0);
+
+                    for (dx, dy) in [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)] {
+                        painter.galley(text_pos + offset + egui::vec2(dx, dy), shadow_galley.clone(), shadow_col);
+                    }
+                    painter.galley(text_pos + offset, galley, text_col);
+                }
+            }
+            crate::types::SettlementTier::Town => {}
+        }
+    }
+}
+
 pub fn draw_ui(
     ctx: &egui::Context,
     ui_state: &mut UiState,
@@ -158,55 +241,76 @@ pub fn draw_ui(
     palette_dirty: &mut bool,
 ) {
     // 1. Top Panel Navigation Bar
-    egui::TopBottomPanel::top("top_bar").show(ctx, |ui| {
-        ui.horizontal(|ui| {
-            ui.heading("⚔ Grand Strategy Rust Engine");
-            ui.label(egui::RichText::new("22,711 Provinces • 1450 Scenario").color(egui::Color32::from_rgb(0, 210, 255)).strong());
+    egui::TopBottomPanel::top("top_bar")
+        .frame(egui::Frame::default().fill(egui::Color32::from_rgb(18, 22, 28)).inner_margin(egui::Margin::symmetric(10, 6)))
+        .show(ctx, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(8.0, 4.0);
 
-            ui.separator();
+                // Section 1: Brand & Scenario Badge
+                ui.heading("⚔ Grand Strategy Engine");
+                ui.label(egui::RichText::new("22,711 Locations • 1450 Scenario").color(egui::Color32::from_rgb(0, 210, 255)).strong());
 
-            // Performance Badge
-            let fps_color = if stats.fps >= 55 {
-                egui::Color32::from_rgb(46, 204, 113)
-            } else {
-                egui::Color32::from_rgb(231, 76, 60)
-            };
-            ui.colored_label(fps_color, format!("{} FPS", stats.fps));
-            ui.label(format!("{:.1}ms", stats.render_time_ms));
-            ui.label(format!("{:.2}x", camera.zoom));
+                ui.separator();
 
-            ui.separator();
+                // Section 2: Map Modes
+                let prev_mode = *map_mode;
+                ui.selectable_value(map_mode, MapMode::Political, "Political");
+                ui.selectable_value(map_mode, MapMode::Terrain, "Physical / Terrain");
+                ui.selectable_value(map_mode, MapMode::Wastelands, "Wastelands");
+                ui.selectable_value(map_mode, MapMode::Independent, "Independent");
+                ui.selectable_value(map_mode, MapMode::Plain, "Plain");
 
-            // Map Mode Selectors
-            let prev_mode = *map_mode;
-            ui.selectable_value(map_mode, MapMode::Political, "Political");
-            ui.selectable_value(map_mode, MapMode::Wastelands, "Wastelands");
-            ui.selectable_value(map_mode, MapMode::Independent, "Independent");
-            ui.selectable_value(map_mode, MapMode::Plain, "Plain");
-
-            if prev_mode != *map_mode {
-                *palette_dirty = true;
-            }
-
-            ui.separator();
-
-            ui.checkbox(show_borders, "Borders");
-            ui.checkbox(show_labels, "Labels");
-
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let editor_btn = if ui_state.show_editor { "🎨 Editor [ON]" } else { "🎨 Scenario Editor" };
-                if ui.button(editor_btn).clicked() {
-                    ui_state.show_editor = !ui_state.show_editor;
+                if prev_mode != *map_mode {
+                    *palette_dirty = true;
                 }
+
+                ui.separator();
+
+                // Section 3: Layer Toggles
+                ui.checkbox(show_borders, "Borders");
+                ui.checkbox(show_labels, "Labels");
+                if *show_labels {
+                    egui::ComboBox::from_id_salt("label_algo_combo")
+                        .selected_text(match ui_state.label_algorithm {
+                            crate::types::LabelAlgorithm::Curved => "Curved",
+                            crate::types::LabelAlgorithm::Standard => "Standard",
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut ui_state.label_algorithm, crate::types::LabelAlgorithm::Curved, "Curved");
+                            ui.selectable_value(&mut ui_state.label_algorithm, crate::types::LabelAlgorithm::Standard, "Standard (Revert)");
+                        });
+                }
+
+                ui.checkbox(&mut ui_state.show_cities, "🏙 Cities");
+
+                ui.separator();
+
+                // Section 4: Actions & Scenario Editor
                 if ui.button("🔍 Search (/)").clicked() {
                     ui_state.show_search = !ui_state.show_search;
                 }
                 if ui.button("Reset View").clicked() {
                     camera.fit_to_screen(camera.screen_width, camera.screen_height);
                 }
+                let editor_btn = if ui_state.show_editor { "🎨 Editor [ON]" } else { "🎨 Scenario Editor" };
+                if ui.button(editor_btn).clicked() {
+                    ui_state.show_editor = !ui_state.show_editor;
+                }
+
+                ui.separator();
+
+                // Section 5: Performance Badge
+                let fps_color = if stats.fps >= 55 {
+                    egui::Color32::from_rgb(46, 204, 113)
+                } else {
+                    egui::Color32::from_rgb(231, 76, 60)
+                };
+                ui.colored_label(fps_color, format!("{} FPS", stats.fps));
+                ui.label(format!("{:.1}ms", stats.render_time_ms));
+                ui.label(format!("{:.2}x", camera.zoom));
             });
         });
-    });
 
     // 2. Search Dialog
     if ui_state.show_search {
@@ -493,6 +597,9 @@ pub fn draw_ui(
                                     label,
                                     paths: HashSet::new(),
                                     color: c,
+                                    capital_province_id: None,
+                                    capital_name: None,
+                                    capital_pos: None,
                                 },
                             );
                             ui_state.active_group_key = hex_key;

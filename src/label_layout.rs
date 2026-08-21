@@ -1,4 +1,4 @@
-use crate::types::{MapGroup, Province};
+use crate::types::{LabelAlgorithm, MapGroup, Province};
 use std::collections::HashMap;
 
 #[derive(Clone, Debug)]
@@ -25,6 +25,7 @@ pub struct NationLabel {
 pub fn generate_nation_labels(
     groups: &HashMap<String, MapGroup>,
     provinces: &[Province],
+    algorithm: LabelAlgorithm,
 ) -> Vec<NationLabel> {
     let mut labels = Vec::new();
 
@@ -72,8 +73,17 @@ pub fn generate_nation_labels(
             continue;
         }
 
-        if let Some(nation_label) = build_curved_label(group_key, label_name, main_cluster, pts.len()) {
-            labels.push(nation_label);
+        let nation_label = match algorithm {
+            LabelAlgorithm::Standard => {
+                build_standard_label(group_key, label_name, main_cluster, pts.len())
+            }
+            LabelAlgorithm::Curved => {
+                build_curved_arc_label(group_key, label_name, main_cluster, pts.len())
+            }
+        };
+
+        if let Some(label) = nation_label {
+            labels.push(label);
         }
     }
 
@@ -122,7 +132,8 @@ fn cluster_provinces(pts: &[[f32; 2]], dist_threshold: f32) -> Vec<Vec<[f32; 2]>
     clusters
 }
 
-fn build_curved_label(
+/// 100% Preserved Standard Baseline Label Algorithm (Available for Reversion)
+fn build_standard_label(
     group_key: &str,
     name: &str,
     pts: &[[f32; 2]],
@@ -159,6 +170,8 @@ fn build_curved_label(
 
     let box_w = (max_x - min_x).max(4.0);
     let box_h = (max_y - min_y).max(4.0);
+    let thickness = box_w.min(box_h);
+    let _geo_mean = (box_w * box_h).sqrt();
 
     // 2. Base Zoom Tier: All labels eligible for global visibility
     let (min_zoom, max_zoom) = (0.2, 180.0);
@@ -175,7 +188,44 @@ fn build_curved_label(
             chars: label_chars,
             center: [cx, cy],
             world_span: 6.0,
-            world_font_size: 2.5,
+            world_font_size: 0.65,
+            province_count: total_province_count,
+            min_zoom,
+            max_zoom,
+        });
+    }
+
+    if n == 1 {
+        // Single province nation: layout all letters horizontally centered at cx, cy with compact scaling
+        let world_span = box_w.max(3.5);
+        let target_span = world_span * 0.75;
+        let num_chars = chars.len();
+        let max_font_for_span = (target_span * 1.15) / (0.80 * (num_chars - 1).max(1) as f32 + 0.70);
+        let world_font_size = (thickness * 0.20 + 0.22).min(max_font_for_span).clamp(0.20, 1.20);
+
+        let ideal_step = (target_span - world_font_size * 0.70) / (num_chars - 1).max(1) as f32;
+        let clamped_step = ideal_step.clamp(world_font_size * 0.85, world_font_size * 2.0);
+        let total_world_w = (num_chars - 1) as f32 * clamped_step;
+        let start_x = cx - total_world_w * 0.5;
+
+        let mut label_chars = Vec::with_capacity(num_chars);
+        for (i, &ch) in chars.iter().enumerate() {
+            let x = start_x + i as f32 * clamped_step;
+            let y = cy;
+            label_chars.push(NationLabelChar {
+                ch,
+                world_pos: [x, y],
+                angle: 0.0,
+            });
+        }
+
+        return Some(NationLabel {
+            group_key: group_key.to_string(),
+            name: name.to_string(),
+            chars: label_chars,
+            center: [cx, cy],
+            world_span,
+            world_font_size,
             province_count: total_province_count,
             min_zoom,
             max_zoom,
@@ -442,6 +492,344 @@ fn build_curved_label(
     })
 }
 
+/// Advanced Geodesic Curved Arc Label Algorithm
+/// Fits smooth polynomial/Bézier medial spines along physical landmass curvature
+/// with per-letter tangent rotation and natural cartographic arching.
+fn build_curved_arc_label(
+    group_key: &str,
+    name: &str,
+    pts: &[[f32; 2]],
+    total_province_count: usize,
+) -> Option<NationLabel> {
+    let n = pts.len();
+    if n == 0 {
+        return None;
+    }
+
+    let uppercase_name: String = name.to_uppercase();
+    let chars: Vec<char> = uppercase_name.chars().collect();
+    if chars.is_empty() {
+        return None;
+    }
+
+    // 1. Center of Mass
+    let cx: f32 = pts.iter().map(|p| p[0]).sum::<f32>() / n as f32;
+    let cy: f32 = pts.iter().map(|p| p[1]).sum::<f32>() / n as f32;
+
+    // Bounding Box
+    let mut min_x = f32::INFINITY;
+    let mut max_x = f32::NEG_INFINITY;
+    let mut min_y = f32::INFINITY;
+    let mut max_y = f32::NEG_INFINITY;
+
+    for p in pts {
+        if p[0] < min_x { min_x = p[0]; }
+        if p[0] > max_x { max_x = p[0]; }
+        if p[1] < min_y { min_y = p[1]; }
+        if p[1] > max_y { max_y = p[1]; }
+    }
+
+    let box_w = (max_x - min_x).max(4.0);
+    let box_h = (max_y - min_y).max(4.0);
+    let thickness = box_w.min(box_h);
+    let geo_mean = (box_w * box_h).sqrt();
+    let (min_zoom, max_zoom) = (0.2, 180.0);
+
+    if chars.len() == 1 {
+        let label_chars = vec![NationLabelChar {
+            ch: chars[0],
+            world_pos: [cx, cy],
+            angle: 0.0,
+        }];
+        return Some(NationLabel {
+            group_key: group_key.to_string(),
+            name: name.to_string(),
+            chars: label_chars,
+            center: [cx, cy],
+            world_span: 6.0,
+            world_font_size: 0.65,
+            province_count: total_province_count,
+            min_zoom,
+            max_zoom,
+        });
+    }
+
+    if n == 1 {
+        // Single province nation: layout all letters horizontally centered at cx, cy with compact scaling
+        let world_span = box_w.max(3.5);
+        let target_span = world_span * 0.75;
+        let num_chars = chars.len();
+        let max_font_for_span = (target_span * 1.15) / (0.80 * (num_chars - 1).max(1) as f32 + 0.70);
+        let world_font_size = (thickness * 0.20 + 0.22).min(max_font_for_span).clamp(0.20, 1.20);
+
+        let ideal_step = (target_span - world_font_size * 0.70) / (num_chars - 1).max(1) as f32;
+        let clamped_step = ideal_step.clamp(world_font_size * 0.85, world_font_size * 2.0);
+        let total_world_w = (num_chars - 1) as f32 * clamped_step;
+        let start_x = cx - total_world_w * 0.5;
+
+        let mut label_chars = Vec::with_capacity(num_chars);
+        for (i, &ch) in chars.iter().enumerate() {
+            let x = start_x + i as f32 * clamped_step;
+            let y = cy;
+            label_chars.push(NationLabelChar {
+                ch,
+                world_pos: [x, y],
+                angle: 0.0,
+            });
+        }
+
+        return Some(NationLabel {
+            group_key: group_key.to_string(),
+            name: name.to_string(),
+            chars: label_chars,
+            center: [cx, cy],
+            world_span,
+            world_font_size,
+            province_count: total_province_count,
+            min_zoom,
+            max_zoom,
+        });
+    }
+
+    // 2. 2D Covariance Matrix & Principal Components
+    let mut cov_xx = 0.0f32;
+    let mut cov_yy = 0.0f32;
+    let mut cov_xy = 0.0f32;
+
+    for p in pts {
+        let dx = p[0] - cx;
+        let dy = p[1] - cy;
+        cov_xx += dx * dx;
+        cov_yy += dy * dy;
+        cov_xy += dx * dy;
+    }
+    cov_xx /= n as f32;
+    cov_yy /= n as f32;
+    cov_xy /= n as f32;
+
+    let trace = cov_xx + cov_yy;
+    let det = cov_xx * cov_yy - cov_xy * cov_xy;
+    let disc = ((trace * 0.5).powi(2) - det).max(0.0).sqrt();
+    let lambda1 = trace * 0.5 + disc;
+    let lambda2 = (trace * 0.5 - disc).max(0.001);
+    let aspect_ratio = (lambda1 / lambda2).sqrt();
+
+    // Primary elongation unit vector v1
+    let (mut vx, mut vy) = if aspect_ratio < 1.65 {
+        // Compact country (France, Poland, HRE, Byzantium, Castile, China):
+        // Standard horizontal reading with gentle cartographic arch
+        (1.0, 0.0)
+    } else if cov_xy.abs() > 1e-5 {
+        let x = lambda1 - cov_yy;
+        let y = cov_xy;
+        let norm = (x * x + y * y).sqrt();
+        if norm > 1e-6 {
+            (x / norm, y / norm)
+        } else {
+            (1.0, 0.0)
+        }
+    } else if cov_xx >= cov_yy {
+        (1.0, 0.0)
+    } else {
+        (0.0, 1.0)
+    };
+
+    // Ensure forward reading direction (Left-to-Right for horizontal/diagonal, Top-to-Bottom for vertical)
+    if vx.abs() >= 0.45 * vy.abs() {
+        if vx < 0.0 {
+            vx = -vx;
+            vy = -vy;
+        }
+    } else if vy < 0.0 {
+        vx = -vx;
+        vy = -vy;
+    }
+
+    // Orthogonal unit vector v2 (lateral offset across spine)
+    let (wx, wy) = (-vy, vx);
+
+    // 3. Project points onto local (u, w) frame along spine
+    let mut u_coords = Vec::with_capacity(n);
+    let mut w_coords = Vec::with_capacity(n);
+    for p in pts {
+        let dx = p[0] - cx;
+        let dy = p[1] - cy;
+        let u = dx * vx + dy * vy;
+        let w = dx * wx + dy * wy;
+        u_coords.push(u);
+        w_coords.push(w);
+    }
+
+    let min_u = u_coords.iter().cloned().fold(f32::INFINITY, f32::min);
+    let max_u = u_coords.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+    let u_span = (max_u - min_u).max(3.0);
+    let u_half = u_span * 0.5;
+
+    // 4. Fit smooth polynomial spine w(u) = a*u^2 + b*u + c
+    let mut sum_u4 = 0.0f32;
+    let mut sum_u3 = 0.0f32;
+    let mut sum_u2 = 0.0f32;
+    let mut sum_u1 = 0.0f32;
+    let mut sum_w = 0.0f32;
+    let mut sum_wu = 0.0f32;
+    let mut sum_wu2 = 0.0f32;
+
+    for i in 0..n {
+        let u = u_coords[i];
+        let w = w_coords[i];
+        let u2 = u * u;
+        sum_u4 += u2 * u2;
+        sum_u3 += u2 * u;
+        sum_u2 += u2;
+        sum_u1 += u;
+        sum_w += w;
+        sum_wu += w * u;
+        sum_wu2 += w * u2;
+    }
+
+    let nf = n as f32;
+    let det_m = sum_u4 * (sum_u2 * nf - sum_u1 * sum_u1)
+        - sum_u3 * (sum_u3 * nf - sum_u1 * sum_u2)
+        + sum_u2 * (sum_u3 * sum_u1 - sum_u2 * sum_u2);
+
+    let (fit_a, fit_b) = if det_m.abs() > 1e-4 {
+        let a = (sum_wu2 * (sum_u2 * nf - sum_u1 * sum_u1)
+            - sum_u3 * (sum_wu * nf - sum_u1 * sum_w)
+            + sum_u2 * (sum_wu * sum_u1 - sum_u2 * sum_w)) / det_m;
+        let b = (sum_u4 * (sum_wu * nf - sum_u1 * sum_w)
+            - sum_wu2 * (sum_u3 * nf - sum_u1 * sum_u2)
+            + sum_u2 * (sum_u3 * sum_w - sum_wu * sum_u2)) / det_m;
+        (a, b)
+    } else {
+        (0.0, 0.0)
+    };
+
+    // Clamp curvature bounds to maintain graceful legibility
+    let max_curv = 0.30 / u_half.max(2.0);
+    let a_clamped = fit_a.clamp(-max_curv, max_curv);
+    let b_clamped = fit_b.clamp(-0.35, 0.35);
+
+    // If curvature is gentle or nation is compact, add a majestic subtle cartographic arch
+    let curve_a = if a_clamped.abs() < 0.003 && aspect_ratio < 2.2 {
+        -0.05 / u_half.max(2.0)
+    } else {
+        a_clamped
+    };
+    let curve_b = b_clamped;
+
+    // Evaluates point on curved spine in world coordinates and tangent derivative
+    let eval_curve = |u: f32| -> ([f32; 2], [f32; 2]) {
+        let w = curve_a * u * u + curve_b * u;
+        let dw_du = 2.0 * curve_a * u + curve_b;
+        let px = cx + u * vx + w * wx;
+        let py = cy + u * vy + w * wy;
+        let tx = vx + dw_du * wx;
+        let ty = vy + dw_du * wy;
+        ([px, py], [tx, ty])
+    };
+
+    // Numerical Arc Length Sampling (32 discrete segments)
+    const SAMPLES: usize = 32;
+    let mut u_start = -u_half * 0.70;
+    let mut u_end = u_half * 0.70;
+
+    let p_start = eval_curve(u_start).0;
+    let p_end = eval_curve(u_end).0;
+    let d_x = p_end[0] - p_start[0];
+    let d_y = p_end[1] - p_start[1];
+
+    if d_x.abs() < 0.45 * d_y.abs() {
+        if p_end[1] < p_start[1] {
+            std::mem::swap(&mut u_start, &mut u_end);
+        }
+    } else if p_end[0] < p_start[0] {
+        std::mem::swap(&mut u_start, &mut u_end);
+    }
+
+    let u_range = u_end - u_start;
+
+    let mut arc_lens = [0.0f32; SAMPLES + 1];
+    let mut prev_pt = eval_curve(u_start).0;
+    for k in 1..=SAMPLES {
+        let u = u_start + (k as f32 / SAMPLES as f32) * u_range;
+        let pt = eval_curve(u).0;
+        let d = ((pt[0] - prev_pt[0]).powi(2) + (pt[1] - prev_pt[1]).powi(2)).sqrt();
+        arc_lens[k] = arc_lens[k - 1] + d;
+        prev_pt = pt;
+    }
+    let total_arc_len = arc_lens[SAMPLES].max(1.0);
+
+    let s_to_u = |s: f32| -> f32 {
+        let s_clamped = s.clamp(0.0, total_arc_len);
+        for k in 1..=SAMPLES {
+            if arc_lens[k] >= s_clamped {
+                let s_prev = arc_lens[k - 1];
+                let s_next = arc_lens[k];
+                let frac = if (s_next - s_prev).abs() > 1e-6 {
+                    (s_clamped - s_prev) / (s_next - s_prev)
+                } else {
+                    0.0
+                };
+                let u_k_prev = u_start + ((k - 1) as f32 / SAMPLES as f32) * u_range;
+                let u_k_next = u_start + (k as f32 / SAMPLES as f32) * u_range;
+                return u_k_prev + frac * (u_k_next - u_k_prev);
+            }
+        }
+        u_end
+    };
+
+    let num_chars = chars.len();
+    let target_arc = total_arc_len * 0.78;
+
+    let natural_font = (thickness * 0.16 + geo_mean * 0.05 + 0.35).clamp(0.4, 6.5);
+    let max_font_for_span = (target_arc * 1.15) / (0.80 * (num_chars - 1).max(1) as f32 + 0.70);
+    let world_font_size = natural_font.min(max_font_for_span).clamp(0.25, 6.0);
+
+    let ideal_step = (target_arc - world_font_size * 0.70) / (num_chars - 1).max(1) as f32;
+    let s_step = ideal_step.clamp(world_font_size * 0.85, world_font_size * 2.20);
+    let total_used_arc = (num_chars - 1) as f32 * s_step;
+    let s_start = ((total_arc_len - total_used_arc) * 0.5).max(0.0);
+
+    let is_vertical = d_x.abs() < 0.45 * d_y.abs();
+
+    let mut label_chars = Vec::with_capacity(num_chars);
+    for (i, &ch) in chars.iter().enumerate() {
+        let s = s_start + i as f32 * s_step;
+        let u = s_to_u(s);
+        let (pt, tangent) = eval_curve(u);
+
+        let angle = if is_vertical {
+            0.0
+        } else {
+            let mut a = tangent[1].atan2(tangent[0]);
+            if a > std::f32::consts::FRAC_PI_2 {
+                a -= std::f32::consts::PI;
+            } else if a < -std::f32::consts::FRAC_PI_2 {
+                a += std::f32::consts::PI;
+            }
+            a.clamp(-0.52, 0.52) // Gracefully clamped within +/- 30 degrees
+        };
+
+        label_chars.push(NationLabelChar {
+            ch,
+            world_pos: pt,
+            angle,
+        });
+    }
+
+    Some(NationLabel {
+        group_key: group_key.to_string(),
+        name: name.to_string(),
+        chars: label_chars,
+        center: [cx, cy],
+        world_span: u_span,
+        world_font_size,
+        province_count: total_province_count,
+        min_zoom,
+        max_zoom,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -465,6 +853,8 @@ mod tests {
                 color: [200, 200, 200],
                 is_wasteland: false,
                 centroid: [centroid.0, centroid.1],
+                settlement: None,
+                biome: crate::types::BiomeType::Grassland,
             });
         }
 
@@ -482,11 +872,14 @@ mod tests {
                     label,
                     color: [255, 255, 255],
                     paths,
+                    capital_province_id: None,
+                    capital_name: None,
+                    capital_pos: None,
                 });
             }
         }
 
-        let labels = generate_nation_labels(&groups, &provinces);
+        let labels = generate_nation_labels(&groups, &provinces, LabelAlgorithm::Curved);
         let mut sorted = labels.clone();
         sorted.sort_by(|a, b| b.world_font_size.partial_cmp(&a.world_font_size).unwrap());
 

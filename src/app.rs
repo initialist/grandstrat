@@ -17,6 +17,7 @@ pub struct GrandStratApp {
     provinces: Vec<Province>,
     groups: HashMap<String, MapGroup>,
     nation_labels: Vec<NationLabel>,
+    settlements: crate::settlement::SettlementRegistry,
     ui_state: UiState,
 
     hovered_idx: Option<usize>,
@@ -31,6 +32,7 @@ pub struct GrandStratApp {
     stats: RenderStats,
     frame_count: u32,
     fps_timer: Instant,
+    start_time: Instant,
     screenshot_stage: Option<usize>,
     screenshot_wait: u32,
 }
@@ -89,10 +91,13 @@ impl GrandStratApp {
             are_borders_shown: None,
         });
 
-        let groups = apply_config(&config, &mut provinces, &id_to_index);
+        let mut groups = apply_config(&config, &mut provinces, &id_to_index);
         println!("Applied {} groups across provinces", groups.len());
 
-        let nation_labels = generate_nation_labels(&groups, &provinces);
+        let settlements = crate::settlement::SettlementRegistry::build(&mut provinces, &mut groups);
+        println!("Built settlement registry for {} EU5 locations", settlements.settlements.len());
+
+        let nation_labels = generate_nation_labels(&groups, &provinces, crate::types::LabelAlgorithm::Curved);
         println!("Generated {} curved nation labels", nation_labels.len());
 
         let raster_map = get_or_build_id_map(&raw_paths);
@@ -124,6 +129,7 @@ impl GrandStratApp {
             provinces,
             groups,
             nation_labels,
+            settlements,
             ui_state: UiState::default(),
             hovered_idx: None,
             selected_idx: None,
@@ -135,6 +141,7 @@ impl GrandStratApp {
             stats: RenderStats::default(),
             frame_count: 0,
             fps_timer: Instant::now(),
+            start_time: Instant::now(),
             screenshot_stage: if std::env::args().any(|a| a == "--screenshots") { Some(0) } else { None },
             screenshot_wait: 0,
         }
@@ -168,23 +175,35 @@ impl GrandStratApp {
 
     fn apply_editor_action(&mut self, p_idx: usize) -> bool {
         let mut dirty = false;
+        let p_id = self.provinces[p_idx].id.clone();
+        let old_group_key = self.provinces[p_idx].group_key.clone();
+
         match self.ui_state.active_tool {
             EditorTool::Brush => {
                 let group_key = self.ui_state.active_group_key.clone();
-                if let Some(g) = self.groups.get(&group_key) {
-                    let p = &mut self.provinces[p_idx];
-                    p.group_key = group_key;
-                    p.group_label = g.label.clone();
-                    p.color = g.color;
-                    dirty = true;
+                if old_group_key != group_key {
+                    if let Some(old_g) = self.groups.get_mut(&old_group_key) {
+                        old_g.paths.remove(&p_id);
+                    }
+                    if let Some(new_g) = self.groups.get_mut(&group_key) {
+                        new_g.paths.insert(p_id);
+                        self.provinces[p_idx].group_key = group_key;
+                        self.provinces[p_idx].group_label = new_g.label.clone();
+                        self.provinces[p_idx].color = new_g.color;
+                        dirty = true;
+                    }
                 }
             }
             EditorTool::Eraser => {
-                let p = &mut self.provinces[p_idx];
-                p.group_key = String::new();
-                p.group_label = "Unassigned".to_string();
-                p.color = [209, 219, 221];
-                dirty = true;
+                if !old_group_key.is_empty() {
+                    if let Some(old_g) = self.groups.get_mut(&old_group_key) {
+                        old_g.paths.remove(&p_id);
+                    }
+                    self.provinces[p_idx].group_key = String::new();
+                    self.provinces[p_idx].group_label = "Unassigned".to_string();
+                    self.provinces[p_idx].color = [209, 219, 221];
+                    dirty = true;
+                }
             }
             EditorTool::Eyedropper => {
                 let p = &self.provinces[p_idx];
@@ -317,10 +336,19 @@ impl eframe::App for GrandStratApp {
                         self.hovered_idx,
                         self.selected_idx,
                         self.show_borders,
+                        self.map_mode,
+                        self.ui_state.relief_strength,
+                        self.start_time.elapsed().as_secs_f32(),
                     );
                 }
 
-                // Render Paradox-style Curved Sprawling Nation Labels
+                // 1. Render EU5 Settlements (Capitals & Major Cities) BELOW nation labels
+                if self.ui_state.show_cities {
+                    let visible_settlements = self.settlements.get_visible(&self.camera, rect);
+                    crate::ui::draw_settlements(&ui.painter(), &visible_settlements, &self.camera, rect);
+                }
+
+                // 2. Render Country / Group Labels ON TOP of city labels
                 if self.show_labels {
                     draw_curved_nation_labels(&ui.painter(), &self.nation_labels, &self.camera, rect);
                 }
@@ -328,6 +356,7 @@ impl eframe::App for GrandStratApp {
 
         // Draw UI Windows & Overlays
         let mut export_requested = false;
+        let prev_algo = self.ui_state.label_algorithm;
         draw_ui(
             ctx,
             &mut self.ui_state,
@@ -344,12 +373,17 @@ impl eframe::App for GrandStratApp {
             &mut palette_dirty,
         );
 
-        // Refresh GPU palette & nation labels if dirty
+        if prev_algo != self.ui_state.label_algorithm {
+            self.nation_labels = generate_nation_labels(&self.groups, &self.provinces, self.ui_state.label_algorithm);
+        }
+
+        // Refresh GPU palette, nation labels, and settlements if dirty
         if palette_dirty {
             if let Some(renderer) = &mut self.gpu_renderer {
                 renderer.update_palette(&self.provinces, self.map_mode, [1, 63, 63], [209, 219, 221]);
             }
-            self.nation_labels = generate_nation_labels(&self.groups, &self.provinces);
+            self.settlements = crate::settlement::SettlementRegistry::build(&mut self.provinces, &mut self.groups);
+            self.nation_labels = generate_nation_labels(&self.groups, &self.provinces, self.ui_state.label_algorithm);
         }
 
         if export_requested {
@@ -401,7 +435,7 @@ impl eframe::App for GrandStratApp {
 
                 match next_stage {
                     1 => {
-                        // Stage 1: Europe Overview (France, HRE, Poland, Castile, England, Italy)
+                        // Stage 1: Europe Overview (France, HRE, Alps, Poland, Castile, Italy)
                         self.camera.screen_width = sw;
                         self.camera.screen_height = sh;
                         self.camera.jump_to(600.0, 150.0, 3.8);
@@ -409,6 +443,7 @@ impl eframe::App for GrandStratApp {
                         self.camera.pan_x = self.camera.target_pan_x;
                         self.camera.pan_y = self.camera.target_pan_y;
                         self.camera.is_animating = false;
+                        self.map_mode = MapMode::Political;
                     }
                     2 => {
                         // Stage 2: France & England Close-up
@@ -419,9 +454,10 @@ impl eframe::App for GrandStratApp {
                         self.camera.pan_x = self.camera.target_pan_x;
                         self.camera.pan_y = self.camera.target_pan_y;
                         self.camera.is_animating = false;
+                        self.map_mode = MapMode::Political;
                     }
                     3 => {
-                        // Stage 3: East Asia & Ming Overview
+                        // Stage 3: East Asia & Himalayas Overview
                         self.camera.screen_width = sw;
                         self.camera.screen_height = sh;
                         self.camera.jump_to(950.0, 220.0, 3.2);
@@ -429,9 +465,10 @@ impl eframe::App for GrandStratApp {
                         self.camera.pan_x = self.camera.target_pan_x;
                         self.camera.pan_y = self.camera.target_pan_y;
                         self.camera.is_animating = false;
+                        self.map_mode = MapMode::Political;
                     }
                     4 => {
-                        // Stage 4: Japan Curved Spine Close-up
+                        // Stage 4: Japan & Asian Biomes (Physical / Terrain Mode)
                         self.camera.screen_width = sw;
                         self.camera.screen_height = sh;
                         self.camera.jump_to(1015.0, 208.0, 6.8);
@@ -439,9 +476,10 @@ impl eframe::App for GrandStratApp {
                         self.camera.pan_x = self.camera.target_pan_x;
                         self.camera.pan_y = self.camera.target_pan_y;
                         self.camera.is_animating = false;
+                        self.map_mode = MapMode::Terrain;
                     }
                     5 => {
-                        // Stage 5: Inca Andes Spine
+                        // Stage 5: Inca Andes Spine & South American Biomes (Physical / Terrain Mode)
                         self.camera.screen_width = sw;
                         self.camera.screen_height = sh;
                         self.camera.jump_to(320.0, 400.0, 3.5);
@@ -449,6 +487,7 @@ impl eframe::App for GrandStratApp {
                         self.camera.pan_x = self.camera.target_pan_x;
                         self.camera.pan_y = self.camera.target_pan_y;
                         self.camera.is_animating = false;
+                        self.map_mode = MapMode::Terrain;
                     }
                     _ => {
                         println!("📸 Screenshot tour complete!");

@@ -180,6 +180,8 @@ pub fn build_provinces(raw_paths: &[RawPath]) -> (Vec<Province>, HashMap<String,
             color: [209, 219, 221],
             is_wasteland: false,
             centroid: [cx, cy],
+            settlement: None,
+            biome: crate::types::BiomeType::Grassland,
         });
 
         id_to_index.insert(p.id.clone(), index);
@@ -218,6 +220,9 @@ pub fn apply_config(
                 label: grp.label.clone(),
                 paths,
                 color,
+                capital_province_id: None,
+                capital_name: None,
+                capital_pos: None,
             },
         );
     }
